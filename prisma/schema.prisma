@@ -1,0 +1,135 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkflowInstanceStatus {
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+  ESCALATED
+  CANCELLED
+}
+
+enum ApprovalDecision {
+  APPROVE
+  REJECT
+  ESCALATE
+  AUTO_REJECT
+}
+
+enum EscalationAction {
+  NOTIFY
+  AUTO_ESCALATE
+  AUTO_REJECT
+}
+
+model WorkflowDefinition {
+  id          String           @id @default(uuid())
+  tenantId    String
+  code        String
+  name        String
+  description String?
+  entityType  String
+  isActive    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  steps       WorkflowStep[]
+  instances   WorkflowInstance[]
+  escalations EscalationRule[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, entityType, isActive])
+}
+
+model WorkflowStep {
+  id                   String              @id @default(uuid())
+  workflowDefinitionId String
+  code                 String
+  name                 String
+  sequence             Int
+  approverRole         String
+  requiredApprovals    Int                 @default(1)
+  slaMinutes           Int?
+  isFinal              Boolean             @default(false)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  workflowDefinition   WorkflowDefinition  @relation(fields: [workflowDefinitionId], references: [id], onDelete: Cascade)
+  approvalActions      ApprovalAction[]
+  escalationRules      EscalationRule[]
+
+  @@unique([workflowDefinitionId, code])
+  @@unique([workflowDefinitionId, sequence])
+}
+
+model WorkflowInstance {
+  id                   String                 @id @default(uuid())
+  tenantId             String
+  workflowDefinitionId String
+  entityType           String
+  entityId             String
+  status               WorkflowInstanceStatus @default(IN_PROGRESS)
+  currentStepSequence  Int                    @default(1)
+  startedBy            String
+  stepStartedAt        DateTime               @default(now())
+  completedAt          DateTime?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  workflowDefinition   WorkflowDefinition     @relation(fields: [workflowDefinitionId], references: [id], onDelete: Restrict)
+  approvalActions      ApprovalAction[]
+
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, status, currentStepSequence])
+}
+
+model ApprovalAction {
+  id                 String           @id @default(uuid())
+  tenantId           String
+  workflowInstanceId String
+  workflowStepId     String
+  actorId            String
+  actorRole          String
+  decision           ApprovalDecision
+  comments           String?
+  createdAt          DateTime         @default(now())
+  workflowInstance   WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: Restrict)
+  workflowStep       WorkflowStep     @relation(fields: [workflowStepId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, workflowInstanceId, workflowStepId, decision])
+  @@index([tenantId, actorId, createdAt])
+}
+
+model EscalationRule {
+  id                   String             @id @default(uuid())
+  tenantId             String
+  workflowDefinitionId String
+  workflowStepId       String
+  escalateAfterMinutes Int
+  escalationRole       String
+  action               EscalationAction   @default(NOTIFY)
+  isActive             Boolean            @default(true)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  workflowDefinition   WorkflowDefinition @relation(fields: [workflowDefinitionId], references: [id], onDelete: Cascade)
+  workflowStep         WorkflowStep       @relation(fields: [workflowStepId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, workflowDefinitionId, workflowStepId, isActive])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  tenantId   String
+  entityType String
+  entityId   String
+  action     String
+  actorId    String
+  oldValue   Json?
+  newValue   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, entityType, entityId, createdAt])
+}
