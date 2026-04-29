@@ -53,4 +53,16 @@ export class WorkflowHooksService {
       actor,
     );
   }
+
+  async startResourceAllocationApproval(tenantId: string, allocationId: string, actor: RequestUser) {
+    return this.workflowService.startWorkflow(
+      {
+        tenantId,
+        workflowCode: "RESOURCE_ALLOCATION_APPROVAL",
+        entityType: "RESOURCE_ALLOCATION",
+        entityId: allocationId,
+      },
+      actor,
+    );
+  }
 }

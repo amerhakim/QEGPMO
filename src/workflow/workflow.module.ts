@@ -19,6 +19,6 @@ import { WorkflowService } from "./workflow.service";
     RbacGuard,
     Reflector,
   ],
-  exports: [WorkflowService, WorkflowHooksService, WorkflowIntegrationFacade],
+  exports: [WorkflowService, WorkflowHooksService, WorkflowIntegrationFacade, AuditService],
 })
 export class WorkflowModule {}

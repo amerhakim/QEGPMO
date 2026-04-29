@@ -28,4 +28,11 @@ export class WorkflowIntegrationFacade {
         this.hooks.startBudgetApproval(tenantId, budgetRequestId, actor),
     };
   }
+
+  forResources() {
+    return {
+      startAllocationApproval: (tenantId: string, allocationId: string, actor: RequestUser) =>
+        this.hooks.startResourceAllocationApproval(tenantId, allocationId, actor),
+    };
+  }
 }
