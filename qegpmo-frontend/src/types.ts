@@ -72,6 +72,117 @@ export interface ApiValidationError {
   message: string;
 }
 
+export type DependencyType = "FS" | "SS" | "FF" | "SF";
+
+export interface TaskSummary {
+  taskId: string;
+  projectId: string;
+  parentTaskId?: string | null;
+  wbsCode: string;
+  name: string;
+  taskType: "TASK" | "MILESTONE";
+  status: string;
+  plannedStart?: string;
+  plannedFinish?: string;
+  actualStart?: string;
+  actualFinish?: string;
+  plannedProgressPercent?: number;
+  actualProgressPercent?: number;
+  baselineStart?: string;
+  baselineFinish?: string;
+  updatedBaselineStart?: string;
+  updatedBaselineFinish?: string;
+  scheduleIndicator?: RagStatus;
+  costIndicator?: RagStatus;
+  children?: TaskSummary[];
+}
+
+export interface TaskDetail extends TaskSummary {
+  description?: string;
+  assigneeName?: string;
+  predecessorCount?: number;
+  successorCount?: number;
+  progressTrend?: Array<{
+    period: string;
+    plannedProgressPercent: number;
+    actualProgressPercent: number;
+  }>;
+}
+
+export interface MilestoneSummary {
+  milestoneId: string;
+  projectId: string;
+  code: string;
+  name: string;
+  status: string;
+  baselineDate?: string;
+  forecastDate?: string;
+  actualDate?: string;
+  criticalFlag?: boolean;
+}
+
+export interface DependencyLink {
+  dependencyId: string;
+  predecessorTaskId: string;
+  predecessorTaskName: string;
+  successorTaskId: string;
+  successorTaskName: string;
+  dependencyType: DependencyType;
+  lagDays?: number;
+}
+
+export interface ResourceSummary {
+  resourceId: string;
+  resourceType: "NAMED" | "GENERIC";
+  fullName: string;
+  roleName?: string;
+  skillTags: string[];
+  availabilityStatus?: "AVAILABLE" | "LIMITED" | "UNAVAILABLE";
+  capacityHours?: number;
+  allocatedHours?: number;
+  utilizationPercent?: number;
+  overAllocated?: boolean;
+}
+
+export interface ResourceAllocationPoint {
+  period: string;
+  capacityHours: number;
+  allocatedHours: number;
+  utilizationPercent: number;
+}
+
+export interface ResourceAllocationItem {
+  allocationId: string;
+  projectId: string;
+  projectCode: string;
+  projectName: string;
+  period: string;
+  allocationPercent?: number;
+  plannedHours?: number;
+  actualHours?: number;
+  status?: string;
+}
+
+export interface ResourceDetail extends ResourceSummary {
+  employeeCode?: string;
+  orgUnit?: string;
+  managerName?: string;
+  standardRate?: number;
+  skills: Array<{
+    skillId: string;
+    skillName: string;
+    proficiency?: string;
+  }>;
+  allocationTimeline: ResourceAllocationPoint[];
+  historicalAllocations: ResourceAllocationItem[];
+  workflowState?: {
+    currentState: string;
+    canSubmit: boolean;
+    canApprove: boolean;
+    canReject: boolean;
+  };
+}
+
 export interface DashboardRollup {
   level: "ENTERPRISE" | "PORTFOLIO" | "PROGRAM";
   levelEntityId: string;
@@ -114,4 +225,13 @@ export interface ProjectDetail {
     costStatus: RagStatus;
     overallHealth: RagStatus;
   }>;
+  scheduleSummary?: {
+    baselineStart?: string;
+    baselineEnd?: string;
+    updatedBaselineStart?: string;
+    updatedBaselineEnd?: string;
+  };
+  tasks?: TaskSummary[];
+  milestones?: MilestoneSummary[];
+  dependencies?: DependencyLink[];
 }

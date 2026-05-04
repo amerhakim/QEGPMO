@@ -22,6 +22,7 @@ import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/LoadingState";
 import { ProjectFormDialog } from "../components/ProjectFormDialog";
 import { RagChip } from "../components/RagChip";
+import { ResourceManagementPanel } from "../components/ResourceManagementPanel";
 import type { ProjectSummary, RagStatus } from "../types";
 import { usePermission } from "../hooks/usePermission";
 
@@ -29,6 +30,11 @@ export const ProjectsPage = () => {
   const navigate = useNavigate();
   const canCreate = usePermission("project.create");
   const canUpdate = usePermission("project.update");
+  const canResourceRead = usePermission("resource.read");
+  const canResourceEdit = usePermission("resource.update");
+  const canResourceSubmit = usePermission("resource.workflow.submit");
+  const canResourceApprove = usePermission("resource.workflow.approve");
+  const canResourceReject = usePermission("resource.workflow.reject");
   const [items, setItems] = useState<ProjectSummary[]>([]);
   const [nameFilter, setNameFilter] = useState("");
   const [overallFilter, setOverallFilter] = useState<"ALL" | RagStatus>("ALL");
@@ -203,6 +209,13 @@ export const ProjectsPage = () => {
           setSelectedProject(undefined);
         }}
         onSaved={load}
+      />
+      <ResourceManagementPanel
+        canRead={canResourceRead}
+        canEdit={canResourceEdit}
+        canWorkflowSubmit={canResourceSubmit}
+        canWorkflowApprove={canResourceApprove}
+        canWorkflowReject={canResourceReject}
       />
     </Stack>
   );

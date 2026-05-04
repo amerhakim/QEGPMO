@@ -20,10 +20,14 @@ import { useParams } from "react-router-dom";
 import { apiClient } from "../api/client";
 import { endpoints } from "../api/endpoints";
 import { ErrorState } from "../components/ErrorState";
+import { DependencyPanel } from "../components/DependencyPanel";
 import { LoadingState } from "../components/LoadingState";
+import { MilestoneDetailDialog } from "../components/MilestoneDetailDialog";
 import { ProjectFormDialog } from "../components/ProjectFormDialog";
 import { RagChip } from "../components/RagChip";
-import type { ProjectDetail } from "../types";
+import { TaskDetailDialog } from "../components/TaskDetailDialog";
+import { WbsTaskTree } from "../components/WbsTaskTree";
+import type { MilestoneSummary, ProjectDetail, TaskDetail, TaskSummary } from "../types";
 import { usePermission } from "../hooks/usePermission";
 
 export const ProjectDetailPage = () => {
@@ -33,7 +37,14 @@ export const ProjectDetailPage = () => {
   const canApproveWorkflow = usePermission("project.workflow.approve");
   const canRejectWorkflow = usePermission("project.workflow.reject");
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
+  const [tasks, setTasks] = useState<TaskSummary[]>([]);
+  const [milestones, setMilestones] = useState<MilestoneSummary[]>([]);
   const [editOpen, setEditOpen] = useState(false);
+  const [taskOpen, setTaskOpen] = useState(false);
+  const [taskDetail, setTaskDetail] = useState<TaskDetail | null>(null);
+  const [milestoneOpen, setMilestoneOpen] = useState(false);
+  const [selectedMilestone, setSelectedMilestone] = useState<MilestoneSummary | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(undefined);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,8 +54,18 @@ export const ProjectDetailPage = () => {
     setLoading(true);
     setError(null);
     try {
-      const { data } = await apiClient.get<ProjectDetail>(endpoints.projectById(projectId));
-      setDetail(data);
+      const [projectRes, tasksRes, milestonesRes, depsRes] = await Promise.all([
+        apiClient.get<ProjectDetail>(endpoints.projectById(projectId)),
+        apiClient.get<TaskSummary[]>(endpoints.projectTasks(projectId)),
+        apiClient.get<MilestoneSummary[]>(endpoints.projectMilestones(projectId)),
+        apiClient.get(endpoints.projectDependencies(projectId))
+      ]);
+      setDetail({
+        ...projectRes.data,
+        dependencies: depsRes.data ?? projectRes.data.dependencies
+      });
+      setTasks(tasksRes.data ?? projectRes.data.tasks ?? []);
+      setMilestones(milestonesRes.data ?? projectRes.data.milestones ?? []);
     } catch {
       setError("Unable to load project detail.");
     } finally {
@@ -79,6 +100,29 @@ export const ProjectDetailPage = () => {
       await load();
     } catch {
       setWorkflowError(`Unable to ${action} workflow action.`);
+    }
+  };
+
+  const openTask = async (task: TaskSummary) => {
+    if (!projectId) return;
+    setSelectedTaskId(task.taskId);
+    try {
+      const { data } = await apiClient.get<TaskDetail>(endpoints.projectTaskById(projectId, task.taskId));
+      setTaskDetail(data);
+      setTaskOpen(true);
+    } catch {
+      setWorkflowError("Unable to load task detail.");
+    }
+  };
+
+  const openMilestone = async (milestone: MilestoneSummary) => {
+    if (!projectId) return;
+    try {
+      const { data } = await apiClient.get<MilestoneSummary>(endpoints.projectMilestoneById(projectId, milestone.milestoneId));
+      setSelectedMilestone(data);
+      setMilestoneOpen(true);
+    } catch {
+      setWorkflowError("Unable to load milestone detail.");
     }
   };
 
@@ -227,6 +271,53 @@ export const ProjectDetailPage = () => {
           </Table>
         </CardContent>
       </Card>
+      <Card>
+        <CardContent>
+          <Typography variant="h6" sx={{ mb: 1.5 }}>
+            Tasks List (WBS Hierarchy)
+          </Typography>
+          <WbsTaskTree tasks={tasks} canEdit={canUpdate} onOpenTask={openTask} />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent>
+          <Typography variant="h6" sx={{ mb: 1.5 }}>
+            Milestones
+          </Typography>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Code</TableCell>
+                <TableCell>Name</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell>Baseline</TableCell>
+                <TableCell>Forecast</TableCell>
+                <TableCell>Actual</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {milestones.map((m) => (
+                <TableRow key={m.milestoneId} hover sx={{ cursor: "pointer" }} onClick={() => openMilestone(m)}>
+                  <TableCell>{m.code}</TableCell>
+                  <TableCell>{m.name}</TableCell>
+                  <TableCell>{m.status}</TableCell>
+                  <TableCell>{m.baselineDate ?? "-"}</TableCell>
+                  <TableCell>{m.forecastDate ?? "-"}</TableCell>
+                  <TableCell>{m.actualDate ?? "-"}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent>
+          <Typography variant="h6" sx={{ mb: 1.5 }}>
+            Dependencies Visualization
+          </Typography>
+          <DependencyPanel dependencies={detail.dependencies ?? []} selectedTaskId={selectedTaskId} />
+        </CardContent>
+      </Card>
       <ProjectFormDialog
         open={editOpen}
         mode="edit"
@@ -234,6 +325,8 @@ export const ProjectDetailPage = () => {
         onClose={() => setEditOpen(false)}
         onSaved={load}
       />
+      <TaskDetailDialog open={taskOpen} task={taskDetail} onClose={() => setTaskOpen(false)} readOnly={!canUpdate} />
+      <MilestoneDetailDialog open={milestoneOpen} milestone={selectedMilestone} onClose={() => setMilestoneOpen(false)} />
     </Stack>
   );
 };

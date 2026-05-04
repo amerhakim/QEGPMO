@@ -70,10 +70,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 "project.workflow.submit",
                 "project.workflow.approve",
                 "project.workflow.reject",
+                "resource.read",
+                "resource.update",
+                "resource.workflow.submit",
+                "resource.workflow.approve",
+                "resource.workflow.reject",
                 "export.dashboard",
                 "project.export"
               ]
-            : ["project.read", "project.update", "project.workflow.submit"]
+            : ["project.read", "project.update", "project.workflow.submit", "resource.read"]
     };
     const mockToken = "mock-token";
     localStorage.setItem(TOKEN_KEY, mockToken);
