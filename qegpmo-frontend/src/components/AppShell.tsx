@@ -20,6 +20,27 @@ export const AppShell = ({ children }: { children: React.ReactNode }) => {
             <Button color="inherit" component={NavLink} to="/projects">
               Projects
             </Button>
+            <Button color="inherit" component={NavLink} to="/risks">
+              Risks
+            </Button>
+            <Button color="inherit" component={NavLink} to="/issues">
+              Issues
+            </Button>
+            <Button color="inherit" component={NavLink} to="/changes">
+              Changes
+            </Button>
+            <Button color="inherit" component={NavLink} to="/approvals">
+              Approvals
+            </Button>
+            <Button color="inherit" component={NavLink} to="/ai-weekly-reports">
+              AI Reports
+            </Button>
+            <Button color="inherit" component={NavLink} to="/ai-risk-detection">
+              AI Risks
+            </Button>
+            <Button color="inherit" component={NavLink} to="/reporting">
+              Reporting
+            </Button>
             {user ? (
               <>
                 <Chip size="small" label={`Tenant: ${user.tenantId}`} />

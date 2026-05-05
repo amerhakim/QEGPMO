@@ -75,10 +75,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 "resource.workflow.submit",
                 "resource.workflow.approve",
                 "resource.workflow.reject",
+                "financial.budget.create",
+                "financial.forecast.create",
+                "financial.actual.create",
+                "financial.baseline.create",
+                "financial.summary.compute",
+                "financial.rollup.compute",
+                "financial.excel.export",
+                "ric.excel.export",
+                "ric.risk.update",
+                "ric.issue.update",
+                "workflow.instance.read",
+                "workflow.instance.action",
                 "export.dashboard",
                 "project.export"
               ]
-            : ["project.read", "project.update", "project.workflow.submit", "resource.read"]
+            : [
+                "project.read",
+                "project.update",
+                "project.workflow.submit",
+                "resource.read",
+                "financial.excel.export",
+                "financial.summary.compute",
+                "ric.excel.export",
+                "workflow.instance.read",
+                "workflow.instance.action"
+              ]
     };
     const mockToken = "mock-token";
     localStorage.setItem(TOKEN_KEY, mockToken);

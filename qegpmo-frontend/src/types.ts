@@ -183,6 +183,225 @@ export interface ResourceDetail extends ResourceSummary {
   };
 }
 
+export type FinancialObjectType = "PROJECT" | "PROGRAM" | "PORTFOLIO" | "ENTERPRISE";
+export type BudgetCategory = "CAPEX" | "OPEX";
+export type FinancialRag = "GREEN" | "AMBER" | "RED";
+
+export interface FinancialBudget {
+  id: string;
+  tenantId: string;
+  objectType: FinancialObjectType;
+  objectId: string;
+  fiscalPeriod: string;
+  category: BudgetCategory;
+  plannedAmount: number;
+  approvedAmount: number;
+  committedAmount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FinancialForecast {
+  id: string;
+  tenantId: string;
+  budgetId: string;
+  forecastPeriod: string;
+  estimateToComplete: number;
+  estimateAtCompletion: number;
+  notes?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FinancialActualCost {
+  id: string;
+  tenantId: string;
+  budgetId: string;
+  postingPeriod: string;
+  postingDate: string;
+  amount: number;
+  sourceReference?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface FinancialSummaryRow {
+  id: string;
+  tenantId: string;
+  objectType: FinancialObjectType;
+  objectId: string;
+  period: string;
+  totalApprovedBudget: number;
+  totalForecastEac: number;
+  totalActualCost: number;
+  costVariance: number;
+  costVariancePercent: number;
+  ragStatus: FinancialRag;
+  computedAt: string;
+}
+
+export type RicSeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+export type RicStatus = "OPEN" | "IN_PROGRESS" | "MITIGATED" | "CLOSED" | "ESCALATED";
+
+export interface RiskRecord {
+  id: string;
+  tenantId: string;
+  objectType: FinancialObjectType;
+  objectId: string;
+  title: string;
+  description?: string;
+  category?: string;
+  probability: number;
+  impact: number;
+  severity: RicSeverity;
+  severityWeight: number;
+  exposureScore: number;
+  ownerId: string;
+  reviewDate?: string;
+  status: RicStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IssueRecord {
+  id: string;
+  tenantId: string;
+  objectType: FinancialObjectType;
+  objectId: string;
+  title: string;
+  description?: string;
+  severity: RicSeverity;
+  ownerId: string;
+  status: RicStatus;
+  openedAt: string;
+  targetResolutionDate?: string;
+  resolvedAt?: string;
+  agingDays?: number;
+  escalationSlaDays: number;
+  isEscalated: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChangeRequestRecord {
+  id: string;
+  tenantId: string;
+  objectType: FinancialObjectType;
+  objectId: string;
+  title: string;
+  description?: string;
+  requestedBy: string;
+  status: RicStatus;
+  scopeImpact: number;
+  scheduleImpactDays: number;
+  costImpact: number;
+  resourceImpactHours: number;
+  workflowInstanceId?: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkflowApprovalItem {
+  instanceId: string;
+  tenantId: string;
+  entityType: string;
+  entityId: string;
+  workflowCode: string;
+  workflowName: string;
+  currentStepName: string;
+  currentStepSequence: number;
+  stepStartedAt: string;
+  slaMinutes?: number;
+  status: string;
+}
+
+export interface WorkflowApprovalAction {
+  id: string;
+  actorId: string;
+  actorRole: string;
+  decision: string;
+  comments?: string;
+  createdAt: string;
+}
+
+export interface WorkflowInstanceDetail {
+  id: string;
+  tenantId: string;
+  entityType: string;
+  entityId: string;
+  status: string;
+  currentStepSequence: number;
+  stepStartedAt: string;
+  startedBy: string;
+  completedAt?: string;
+  workflowDefinition: {
+    code: string;
+    name: string;
+    steps: Array<{
+      id: string;
+      code: string;
+      name: string;
+      sequence: number;
+      approverRole: string;
+      requiredApprovals: number;
+      slaMinutes?: number;
+    }>;
+  };
+  approvalActions: WorkflowApprovalAction[];
+}
+
+export interface AiWeeklyReport {
+  reportId: string;
+  projectId?: string;
+  periodStart: string;
+  periodEnd: string;
+  title: string;
+  content: string;
+  status: string;
+  workflowInstanceId?: string;
+  generatedAt: string;
+  updatedAt: string;
+}
+
+export interface AiWeeklyReportVersion {
+  versionId: string;
+  reportId: string;
+  versionNumber: number;
+  content: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface AiRiskSuggestion {
+  suggestionId: string;
+  projectId?: string;
+  title: string;
+  description?: string;
+  severity: RicSeverity;
+  confidenceScore: number;
+  explanation: string;
+  status: string;
+  detectedAt: string;
+}
+
+export interface RicRollupRow {
+  id: string;
+  tenantId: string;
+  objectType: FinancialObjectType;
+  objectId: string;
+  period: string;
+  riskExposureTotal: number;
+  issueWeightedTotal: number;
+  criticalCount: number;
+  highCount: number;
+  mediumCount: number;
+  lowCount: number;
+  computedAt: string;
+}
+
 export interface DashboardRollup {
   level: "ENTERPRISE" | "PORTFOLIO" | "PROGRAM";
   levelEntityId: string;

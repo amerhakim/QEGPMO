@@ -20,6 +20,7 @@ import { apiClient } from "../api/client";
 import { endpoints } from "../api/endpoints";
 import { ErrorState } from "../components/ErrorState";
 import { LoadingState } from "../components/LoadingState";
+import { FinancialManagementPanel } from "../components/FinancialManagementPanel";
 import { ProjectFormDialog } from "../components/ProjectFormDialog";
 import { RagChip } from "../components/RagChip";
 import { ResourceManagementPanel } from "../components/ResourceManagementPanel";
@@ -35,6 +36,10 @@ export const ProjectsPage = () => {
   const canResourceSubmit = usePermission("resource.workflow.submit");
   const canResourceApprove = usePermission("resource.workflow.approve");
   const canResourceReject = usePermission("resource.workflow.reject");
+  const canFinancialRead = usePermission("financial.excel.export");
+  const canFinancialCreateBudget = usePermission("financial.budget.create");
+  const canFinancialCreateForecast = usePermission("financial.forecast.create");
+  const canFinancialCreateActual = usePermission("financial.actual.create");
   const [items, setItems] = useState<ProjectSummary[]>([]);
   const [nameFilter, setNameFilter] = useState("");
   const [overallFilter, setOverallFilter] = useState<"ALL" | RagStatus>("ALL");
@@ -216,6 +221,13 @@ export const ProjectsPage = () => {
         canWorkflowSubmit={canResourceSubmit}
         canWorkflowApprove={canResourceApprove}
         canWorkflowReject={canResourceReject}
+      />
+      <FinancialManagementPanel
+        projects={items.map((item) => ({ projectId: item.projectId, projectCode: item.projectCode, name: item.name }))}
+        canRead={canFinancialRead}
+        canCreateBudget={canFinancialCreateBudget}
+        canCreateForecast={canFinancialCreateForecast}
+        canCreateActual={canFinancialCreateActual}
       />
     </Stack>
   );
