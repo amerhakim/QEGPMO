@@ -35,4 +35,18 @@ export class WorkflowIntegrationFacade {
         this.hooks.startResourceAllocationApproval(tenantId, allocationId, actor),
     };
   }
+
+  forStatusReports() {
+    return {
+      startWeeklyStatusReportApproval: (tenantId: string, weeklyStatusReportId: string, actor: RequestUser) =>
+        this.hooks.startWeeklyStatusReportApproval(tenantId, weeklyStatusReportId, actor),
+    };
+  }
+
+  forRiskDetection() {
+    return {
+      startDetectedRiskSuggestionApproval: (tenantId: string, suggestionId: string, actor: RequestUser) =>
+        this.hooks.startDetectedRiskSuggestionApproval(tenantId, suggestionId, actor),
+    };
+  }
 }

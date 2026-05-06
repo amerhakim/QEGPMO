@@ -12,6 +12,12 @@ const demoUser: UserContext = {
     "project.read",
     "ric.rollup.compute",
     "scheduling.progress.read",
+    "scheduling.rollup.compute",
+    "status_report.generate",
+    "status_report.read",
+    "status_report.edit",
+    "status_report.submit",
+    "status_report.export",
   ],
 };
 

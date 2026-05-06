@@ -1,5 +1,6 @@
 import { Type } from "class-transformer";
-import { IsDateString, IsNumber, IsOptional, IsString, Min } from "class-validator";
+import { IsBoolean, IsDateString, IsEnum, IsNumber, IsOptional, IsString, Max, Min } from "class-validator";
+import { TaskStatus } from "@prisma/client";
 
 export class CreateTaskDto {
   @IsString()
@@ -47,4 +48,34 @@ export class CreateTaskDto {
   @IsOptional()
   @IsString()
   msProjectOutlineNumber?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isMilestone?: boolean;
+
+  @IsOptional()
+  @IsDateString()
+  actualStartDate?: string;
+
+  @IsOptional()
+  @IsDateString()
+  actualEndDate?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  actualEffortHours?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  progressPercent?: number;
+
+  /// When importing external schedules, caller may set explicit lifecycle status (otherwise derived from progress).
+  @IsOptional()
+  @IsEnum(TaskStatus)
+  status?: TaskStatus;
 }

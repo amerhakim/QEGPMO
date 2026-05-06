@@ -74,6 +74,12 @@ enum BaselineScope {
   TASK
 }
 
+/// Original baseline vs subsequent rebaseline (MSP-compatible semantics).
+enum BaselineKind {
+  ORIGINAL
+  UPDATED
+}
+
 enum ResourceType {
   NAMED
   GENERIC
@@ -478,6 +484,7 @@ model ScheduleBaseline {
   projectId              String
   taskId                 String?
   scope                  BaselineScope
+  baselineKind           BaselineKind  @default(UPDATED)
   baselineVersion        Int
   baselineDate           DateTime      @default(now())
   plannedStartDate       DateTime
@@ -491,6 +498,26 @@ model ScheduleBaseline {
   task                   Task?         @relation(fields: [taskId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, projectId, baselineVersion, scope])
+  @@index([tenantId, projectId, baselineKind, scope])
+}
+
+/// Deterministic schedule roll-up facts for dashboards (Program / Portfolio / Enterprise).
+model ScheduleRollupSnapshot {
+  id                         String              @id @default(uuid())
+  tenantId                   String
+  objectType                 FinancialObjectType
+  objectId                   String
+  reportingPeriod            String
+  asOfDate                   DateTime            @default(now())
+  actualProgressPercent      Decimal             @db.Decimal(5, 2)
+  expectedProgressPercent    Decimal             @db.Decimal(5, 2)
+  scheduleVariancePercent    Decimal             @db.Decimal(5, 2)
+  scheduleRag                ProjectHealthRag
+  includedProjectCount       Int                 @default(0)
+  leafTaskCount              Int                 @default(0)
+  computedAt                 DateTime            @default(now())
+
+  @@index([tenantId, objectType, objectId, reportingPeriod, computedAt])
 }
 
 model TaskProgressEntry {
@@ -521,6 +548,30 @@ model ScheduleExcelJob {
   createdBy     String
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
+
+  @@index([tenantId, projectId, operation, status, createdAt])
+}
+
+/// Microsoft Project (.mpp / MSPDI XML) integration jobs with audit + confirmation gates.
+model ScheduleMppJob {
+  id                String         @id @default(uuid())
+  tenantId          String
+  projectId         String
+  operation         String
+  status            ExcelJobStatus @default(CREATED)
+  /// MPP_BINARY | MSPDI_XML
+  sourceFormat      String
+  fileName          String
+  /// STRICT_APPEND | REPLACE_SCHEDULE — captured at validation time for commit enforcement.
+  mergeMode         String?
+  payloadJson       Json?
+  validationReport  Json?
+  resultSummary     Json?
+  confirmedAt       DateTime?
+  confirmedBy       String?
+  createdBy         String
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
   @@index([tenantId, projectId, operation, status, createdAt])
 }
@@ -889,4 +940,132 @@ model RicExcelJob {
   updatedAt          DateTime           @updatedAt
 
   @@index([tenantId, entityName, operation, status, createdAt])
+}
+
+/// AI/rule-assisted detection queue — never auto-published as registered risks.
+enum DetectedRiskSuggestionStatus {
+  PROPOSED
+  UNDER_REVIEW
+  PUBLISHED
+  DISMISSED
+}
+
+model RiskDetectionRun {
+  id              String                      @id @default(uuid())
+  tenantId        String
+  scopeType       FinancialObjectType
+  scopeId         String
+  periodLabel     String
+  metricsSnapshot Json
+  factsDigest     String
+  createdBy       String
+  createdAt       DateTime                    @default(now())
+  suggestions     DetectedRiskSuggestion[]
+
+  @@index([tenantId, scopeType, scopeId, createdAt])
+  @@index([tenantId, periodLabel])
+}
+
+model DetectedRiskSuggestion {
+  id                  String                       @id @default(uuid())
+  runId               String
+  tenantId            String
+  objectType          FinancialObjectType
+  objectId            String
+  signalCode          String
+  title               String
+  descriptionDraft    String?
+  category            String?
+  probability         Decimal                      @db.Decimal(5, 2)
+  impact              Decimal                      @db.Decimal(5, 2)
+  severity            SeverityLevel
+  severityWeight      Decimal                      @db.Decimal(5, 2)
+  exposureScore       Decimal                      @db.Decimal(10, 2)
+  confidenceScore     Decimal                      @db.Decimal(5, 2)
+  mitigationDraft     String?
+  evidenceJson        Json
+  aiExplanationJson   Json
+  proposedOwnerId     String
+  status              DetectedRiskSuggestionStatus @default(PROPOSED)
+  workflowInstanceId  String?
+  publishedRiskId     String?
+  reviewerNotes       String?
+  createdAt           DateTime                     @default(now())
+  updatedAt           DateTime                     @updatedAt
+  run                 RiskDetectionRun             @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@index([tenantId, objectType, objectId])
+  @@index([tenantId, signalCode])
+}
+
+enum WeeklyStatusReportStatus {
+  DRAFT
+  UNDER_REVIEW
+  PUBLISHED
+}
+
+enum WeeklyStatusExportFormat {
+  XLSX
+  PDF
+  PPTX
+}
+
+model WeeklyStatusReport {
+  id                  String                     @id @default(uuid())
+  tenantId            String
+  scopeType           FinancialObjectType
+  scopeId             String
+  reportingWeek       String
+  fiscalPeriod        String
+  status              WeeklyStatusReportStatus     @default(DRAFT)
+  publishedAt         DateTime?
+  publishedBy         String?
+  publishedRevisionId String?                    @unique
+  workflowInstanceId  String?
+  pendingPublishRevisionId String?
+  createdBy           String
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+  publishedRevision   WeeklyStatusReportRevision? @relation("PublishedRevisionLink", fields: [publishedRevisionId], references: [id])
+  revisions           WeeklyStatusReportRevision[] @relation("ReportRevisions")
+  exports             WeeklyStatusReportExportJob[]
+
+  @@unique([tenantId, scopeType, scopeId, reportingWeek])
+  @@index([tenantId, status, reportingWeek])
+  @@index([tenantId, workflowInstanceId])
+}
+
+model WeeklyStatusReportRevision {
+  id               String              @id @default(uuid())
+  reportId         String
+  revisionNumber   Int
+  metricsSnapshot  Json
+  aiProposal       Json
+  editorContent    Json
+  createdBy        String
+  createdAt        DateTime            @default(now())
+  report           WeeklyStatusReport  @relation("ReportRevisions", fields: [reportId], references: [id], onDelete: Cascade)
+  linkedAsPublished WeeklyStatusReport? @relation("PublishedRevisionLink")
+  exports          WeeklyStatusReportExportJob[]
+
+  @@unique([reportId, revisionNumber])
+  @@index([reportId, revisionNumber])
+}
+
+model WeeklyStatusReportExportJob {
+  id             String                   @id @default(uuid())
+  tenantId       String
+  reportId       String
+  revisionId     String
+  format         WeeklyStatusExportFormat
+  status         ExcelJobStatus             @default(COMPLETED)
+  fileName       String
+  resultSummary  Json?
+  createdBy      String
+  createdAt      DateTime                   @default(now())
+  report         WeeklyStatusReport         @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  revision       WeeklyStatusReportRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, reportId, createdAt])
 }

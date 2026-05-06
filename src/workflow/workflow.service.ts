@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { ApprovalDecision, EscalationAction, Prisma } from "@prisma/client";
+import { ApprovalDecision, EscalationAction, Prisma, WorkflowInstanceStatus } from "@prisma/client";
 import { RequestUser } from "../common/auth/request-user.interface";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateEscalationRuleDto } from "./dto/create-escalation-rule.dto";
@@ -198,6 +198,7 @@ export class WorkflowService {
         data: { status: "REJECTED", completedAt: new Date() },
       });
       await this.logApprovalAudit(tenantId, instance.id, actor.userId, previous, updated, action);
+      await this.syncIntegratedWorkflowOutcomes(tenantId, instance.entityType, instance.entityId, updated.status, actor.userId);
       return updated;
     }
 
@@ -218,6 +219,7 @@ export class WorkflowService {
           : { status: "APPROVED", completedAt: new Date() },
       });
       await this.logApprovalAudit(tenantId, instance.id, actor.userId, previous, updated, action);
+      await this.syncIntegratedWorkflowOutcomes(tenantId, instance.entityType, instance.entityId, updated.status, actor.userId);
       return updated;
     }
 
@@ -268,6 +270,7 @@ export class WorkflowService {
           oldValue: previous,
           newValue: updated,
         });
+        await this.syncIntegratedWorkflowOutcomes(instance.tenantId, instance.entityType, instance.entityId, updated.status, "SYSTEM");
       } else {
         await this.prisma.workflowInstance.update({
           where: { id: instance.id },
@@ -277,6 +280,162 @@ export class WorkflowService {
       escalatedCount += 1;
     }
     return { checked: candidates.length, escalated: escalatedCount };
+  }
+
+  private async syncIntegratedWorkflowOutcomes(
+    tenantId: string,
+    entityType: string,
+    entityId: string,
+    workflowStatus: WorkflowInstanceStatus,
+    actorId: string,
+  ): Promise<void> {
+    await this.syncWeeklyStatusReportWorkflowOutcome(tenantId, entityType, entityId, workflowStatus, actorId);
+    await this.syncDetectedRiskSuggestionWorkflowOutcome(tenantId, entityType, entityId, workflowStatus, actorId);
+  }
+
+  /** Side-effects when workflow completes for integrated entities (no metric recomputation). */
+  private async syncWeeklyStatusReportWorkflowOutcome(
+    tenantId: string,
+    entityType: string,
+    entityId: string,
+    workflowStatus: WorkflowInstanceStatus,
+    actorId: string,
+  ): Promise<void> {
+    if (entityType !== "WEEKLY_STATUS_REPORT") return;
+
+    if (workflowStatus === "APPROVED") {
+      const report = await this.prisma.weeklyStatusReport.findFirst({
+        where: { id: entityId, tenantId },
+      });
+      if (!report?.pendingPublishRevisionId) return;
+
+      const updated = await this.prisma.weeklyStatusReport.update({
+        where: { id: entityId },
+        data: {
+          status: "PUBLISHED",
+          publishedRevisionId: report.pendingPublishRevisionId,
+          publishedAt: new Date(),
+          publishedBy: actorId,
+          workflowInstanceId: null,
+          pendingPublishRevisionId: null,
+        },
+      });
+
+      await this.auditService.log({
+        tenantId,
+        entityType: "WeeklyStatusReport",
+        entityId,
+        action: "STATUS_REPORT_PUBLISHED_BY_WORKFLOW",
+        actorId,
+        newValue: {
+          publishedRevisionId: updated.publishedRevisionId,
+          workflowApprovedBy: actorId,
+        },
+      });
+      return;
+    }
+
+    if (workflowStatus === "REJECTED") {
+      await this.prisma.weeklyStatusReport.updateMany({
+        where: { id: entityId, tenantId, status: "UNDER_REVIEW" },
+        data: {
+          status: "DRAFT",
+          workflowInstanceId: null,
+          pendingPublishRevisionId: null,
+        },
+      });
+
+      await this.auditService.log({
+        tenantId,
+        entityType: "WeeklyStatusReport",
+        entityId,
+        action: "STATUS_REPORT_APPROVAL_REJECTED",
+        actorId,
+        newValue: { workflowStatus: "REJECTED" },
+      });
+    }
+  }
+
+  private async syncDetectedRiskSuggestionWorkflowOutcome(
+    tenantId: string,
+    entityType: string,
+    entityId: string,
+    workflowStatus: WorkflowInstanceStatus,
+    actorId: string,
+  ): Promise<void> {
+    if (entityType !== "DETECTED_RISK_SUGGESTION") return;
+
+    if (workflowStatus === "APPROVED") {
+      const suggestion = await this.prisma.detectedRiskSuggestion.findFirst({
+        where: { id: entityId, tenantId },
+      });
+      if (!suggestion || suggestion.status !== "UNDER_REVIEW") return;
+
+      const risk = await this.prisma.risk.create({
+        data: {
+          tenantId: suggestion.tenantId,
+          objectType: suggestion.objectType,
+          objectId: suggestion.objectId,
+          title: suggestion.title,
+          description: suggestion.descriptionDraft ?? undefined,
+          category: suggestion.category ?? "DETECTED_BY_ENGINE",
+          probability: suggestion.probability,
+          impact: suggestion.impact,
+          severity: suggestion.severity,
+          severityWeight: suggestion.severityWeight,
+          exposureScore: suggestion.exposureScore,
+          ownerId: suggestion.proposedOwnerId,
+        },
+      });
+
+      await this.prisma.detectedRiskSuggestion.update({
+        where: { id: suggestion.id },
+        data: {
+          status: "PUBLISHED",
+          publishedRiskId: risk.id,
+          workflowInstanceId: null,
+        },
+      });
+
+      await this.auditService.log({
+        tenantId,
+        entityType: "DetectedRiskSuggestion",
+        entityId,
+        action: "DETECTED_RISK_PUBLISHED_TO_REGISTER",
+        actorId,
+        newValue: { riskId: risk.id, workflowApprovedBy: actorId },
+      });
+      await this.auditService.log({
+        tenantId,
+        entityType: "Risk",
+        entityId: risk.id,
+        action: "RISK_CREATED_FROM_DETECTION_APPROVAL",
+        actorId,
+        newValue: {
+          title: risk.title,
+          severity: risk.severity,
+          exposureScore: risk.exposureScore.toString(),
+          objectType: risk.objectType,
+          objectId: risk.objectId,
+        },
+      });
+      return;
+    }
+
+    if (workflowStatus === "REJECTED") {
+      await this.prisma.detectedRiskSuggestion.updateMany({
+        where: { id: entityId, tenantId, status: "UNDER_REVIEW" },
+        data: { status: "PROPOSED", workflowInstanceId: null },
+      });
+      await this.auditService.log({
+        tenantId,
+        entityType: "DetectedRiskSuggestion",
+        entityId,
+        action: "DETECTED_RISK_APPROVAL_REJECTED",
+        actorId,
+        newValue: { workflowStatus: "REJECTED" },
+      });
+    }
   }
 
   private async logApprovalAudit(

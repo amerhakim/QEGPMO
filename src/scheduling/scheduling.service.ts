@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { RequestUser } from "../common/auth/request-user.interface";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuditService } from "../workflow/audit.service";
+import { ComputeScheduleRollupDto } from "./dto/compute-schedule-rollup.dto";
 import { CreateBaselineDto } from "./dto/create-baseline.dto";
 import { CreateDependencyDto } from "./dto/create-dependency.dto";
 import { CreateMilestoneDto } from "./dto/create-milestone.dto";
@@ -36,6 +37,13 @@ export class SchedulingService {
       dto.plannedEndDate,
     );
 
+    const progressPct = dto.progressPercent ?? 0;
+    let status = dto.status ?? "NOT_STARTED";
+    if (dto.status === undefined) {
+      if (progressPct >= 100) status = "DONE";
+      else if (progressPct > 0) status = "IN_PROGRESS";
+    }
+
     const task = await this.prisma.task.create({
       data: {
         tenantId: dto.tenantId,
@@ -50,6 +58,13 @@ export class SchedulingService {
         weight: this.decimal(dto.weight ?? 1),
         msProjectTaskUid: dto.msProjectTaskUid,
         msProjectOutlineNumber: dto.msProjectOutlineNumber,
+        isMilestone: dto.isMilestone ?? false,
+        actualStartDate: dto.actualStartDate ? new Date(dto.actualStartDate) : undefined,
+        actualEndDate: dto.actualEndDate ? new Date(dto.actualEndDate) : undefined,
+        actualEffortHours:
+          dto.actualEffortHours !== undefined ? this.decimal(dto.actualEffortHours) : undefined,
+        progressPercent: this.decimal(progressPct),
+        status,
         expectedProgressPercent: this.decimal(expectedProgress),
       },
     });
@@ -177,12 +192,16 @@ export class SchedulingService {
       const task = await this.prisma.task.findFirst({ where: { id: dto.taskId, tenantId: dto.tenantId, projectId: dto.projectId } });
       if (!task) throw new NotFoundException("Task not found for baseline.");
     }
+    const baselineKind =
+      dto.baselineKind ?? (dto.baselineVersion === 1 ? ("ORIGINAL" as const) : ("UPDATED" as const));
+
     const baseline = await this.prisma.scheduleBaseline.create({
       data: {
         tenantId: dto.tenantId,
         projectId: dto.projectId,
         taskId: dto.taskId,
         scope: dto.scope,
+        baselineKind,
         baselineVersion: dto.baselineVersion,
         plannedStartDate: new Date(dto.plannedStartDate),
         plannedEndDate: new Date(dto.plannedEndDate),
@@ -196,33 +215,105 @@ export class SchedulingService {
     return baseline;
   }
 
-  async calculateProjectProgress(projectId: string, tenantId: string, actor: RequestUser) {
+  async calculateProjectProgress(projectId: string, tenantId: string, actor: RequestUser, asOfDate?: string) {
     this.assertTenant(tenantId, actor);
     await this.ensureProject(projectId, tenantId);
-    const tasks = await this.prisma.task.findMany({ where: { tenantId, projectId } });
-    if (!tasks.length) return { actualProgressPercent: 0, expectedProgressPercent: 0 };
+    const asOf = asOfDate ? new Date(asOfDate) : undefined;
+    if (asOfDate && (!asOf || Number.isNaN(asOf.getTime()))) {
+      throw new BadRequestException("Invalid asOfDate.");
+    }
 
-    const weighted = tasks.reduce(
-      (acc, t) => {
-        const weight = Number(t.weight);
-        acc.totalWeight += weight;
-        acc.actual += Number(t.progressPercent) * weight;
-        acc.expected += Number(t.expectedProgressPercent) * weight;
-        return acc;
-      },
-      { totalWeight: 0, actual: 0, expected: 0 },
+    const { actual, expected, leafTaskCount } = await this.computeLeafWeightedMetricsForProject(
+      projectId,
+      tenantId,
+      asOf,
     );
-    const actual = weighted.totalWeight ? Number((weighted.actual / weighted.totalWeight).toFixed(2)) : 0;
-    const expected = weighted.totalWeight ? Number((weighted.expected / weighted.totalWeight).toFixed(2)) : 0;
+
+    if (!leafTaskCount) {
+      return {
+        actualProgressPercent: 0,
+        expectedProgressPercent: 0,
+        scheduleVariancePercent: 0,
+        scheduleStatus: "GREEN",
+        leafTaskCount: 0,
+        ...(asOf ? { asOfDate: asOf.toISOString() } : {}),
+      };
+    }
+
     const variance = Number((actual - expected).toFixed(2));
-    const scheduleStatus =
-      variance >= -5 ? "GREEN" : variance >= -10 ? "AMBER" : "RED";
+    const scheduleStatus = variance >= -5 ? "GREEN" : variance >= -10 ? "AMBER" : "RED";
     return {
       actualProgressPercent: actual,
       expectedProgressPercent: expected,
       scheduleVariancePercent: variance,
       scheduleStatus,
+      leafTaskCount,
+      ...(asOf ? { asOfDate: asOf.toISOString() } : {}),
     };
+  }
+
+  async computeScheduleRollupSnapshot(dto: ComputeScheduleRollupDto, actor: RequestUser) {
+    this.assertTenant(dto.tenantId, actor);
+    const asOf = dto.asOfDate ? new Date(dto.asOfDate) : undefined;
+    if (dto.asOfDate && (!asOf || Number.isNaN(asOf.getTime()))) {
+      throw new BadRequestException("Invalid asOfDate.");
+    }
+    if (dto.objectType === "ENTERPRISE" && dto.objectId !== dto.tenantId) {
+      throw new BadRequestException("ENTERPRISE schedule rollup requires objectId equal to tenantId.");
+    }
+
+    const projects = await this.resolveProjectsForRollup(dto);
+    if (!projects.length) {
+      throw new BadRequestException("No projects found for roll-up scope.");
+    }
+
+    let sumWeights = 0;
+    let actualW = 0;
+    let expectedW = 0;
+    let leafTotal = 0;
+
+    for (const p of projects) {
+      const budget = Math.max(Number(p.plannedBudget), 0);
+      const w = budget > 0 ? budget : 1;
+      sumWeights += w;
+
+      const m = await this.computeLeafWeightedMetricsForProject(p.id, dto.tenantId, asOf);
+      leafTotal += m.leafTaskCount;
+      actualW += m.actual * w;
+      expectedW += m.expected * w;
+    }
+
+    const actual = sumWeights ? Number((actualW / sumWeights).toFixed(2)) : 0;
+    const expected = sumWeights ? Number((expectedW / sumWeights).toFixed(2)) : 0;
+    const variance = Number((actual - expected).toFixed(2));
+    const scheduleRag = this.varianceToScheduleRag(variance);
+
+    const snapshot = await this.prisma.scheduleRollupSnapshot.create({
+      data: {
+        tenantId: dto.tenantId,
+        objectType: dto.objectType,
+        objectId: dto.objectId,
+        reportingPeriod: dto.reportingPeriod,
+        asOfDate: asOf ?? new Date(),
+        actualProgressPercent: this.decimal(actual),
+        expectedProgressPercent: this.decimal(expected),
+        scheduleVariancePercent: this.decimal(variance),
+        scheduleRag,
+        includedProjectCount: projects.length,
+        leafTaskCount: leafTotal,
+      },
+    });
+
+    await this.audit(
+      dto.tenantId,
+      "ScheduleRollupSnapshot",
+      snapshot.id,
+      "SCHEDULE_ROLLUP_SNAPSHOT_COMPUTED",
+      actor.userId,
+      undefined,
+      snapshot,
+    );
+    return snapshot;
   }
 
   async importSchedulePreview(dto: ImportScheduleDto, actor: RequestUser) {
@@ -359,17 +450,88 @@ export class SchedulingService {
         },
       },
     });
+    await this.audit(dto.tenantId, "ScheduleExcelJob", job.id, "SCHEDULE_EXPORTED", actor.userId, undefined, {
+      rowCount: rows.length,
+      milestones: milestones.length,
+      dependencies: dependencies.length,
+      formatHint: dto.formatHint ?? "MSP_COMPATIBLE",
+    });
     return { jobId: job.id, tasks: rows, milestones, dependencies };
   }
 
-  private calculateExpectedProgress(start: string, end: string): number {
+  /**
+   * Deletes all scheduling artifacts for a project (dependencies, progress entries, baselines, milestones, tasks).
+   * Used only by controlled interchange imports (e.g. MSPDI / Project) — not routed via HTTP directly.
+   */
+  async deleteAllScheduleArtifactsForProject(projectId: string, tenantId: string, actor: RequestUser) {
+    this.assertTenant(tenantId, actor);
+    await this.ensureProject(projectId, tenantId);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.taskDependency.deleteMany({ where: { tenantId, projectId } });
+      const taskIds = (
+        await tx.task.findMany({
+          where: { tenantId, projectId },
+          select: { id: true },
+        })
+      ).map((t) => t.id);
+      if (taskIds.length) {
+        await tx.taskProgressEntry.deleteMany({ where: { tenantId, taskId: { in: taskIds } } });
+      }
+      await tx.scheduleBaseline.deleteMany({ where: { tenantId, projectId } });
+      await tx.milestone.deleteMany({ where: { tenantId, projectId } });
+
+      while ((await tx.task.count({ where: { tenantId, projectId } })) > 0) {
+        const leaves = await tx.task.findMany({
+          where: { tenantId, projectId, children: { none: {} } },
+          select: { id: true },
+          take: 500,
+        });
+        if (!leaves.length) {
+          throw new BadRequestException("Unable to clear task hierarchy (unexpected cycle).");
+        }
+        await tx.task.deleteMany({
+          where: { id: { in: leaves.map((l) => l.id) } },
+        });
+      }
+    });
+
+    await this.audit(tenantId, "Project", projectId, "SCHEDULE_ARTIFACTS_BULK_DELETED", actor.userId, undefined, {
+      reason: "PROJECT_SCHEDULE_REPLACE_IMPORT",
+    });
+  }
+
+  /** Time-elapsed % on baseline/planned interval (MSP-friendly); optional as-of for deterministic reporting. */
+  private calculateExpectedProgress(start: string, end: string, asOf?: Date): number {
     const startDate = new Date(start).getTime();
     const endDate = new Date(end).getTime();
-    const today = new Date().getTime();
+    const anchor = (asOf ?? new Date()).getTime();
     if (endDate <= startDate) return 0;
-    if (today <= startDate) return 0;
-    if (today >= endDate) return 100;
-    return Number((((today - startDate) / (endDate - startDate)) * 100).toFixed(2));
+    if (anchor <= startDate) return 0;
+    if (anchor >= endDate) return 100;
+    return Number((((anchor - startDate) / (endDate - startDate)) * 100).toFixed(2));
+  }
+
+  /** Prefer UPDATED baselines for active schedule; fall back to ORIGINAL (first approved baseline). */
+  private async resolveActiveBaseline(
+    tenantId: string,
+    projectId: string,
+    taskId: string | undefined,
+  ) {
+    const baseWhere = taskId
+      ? { tenantId, projectId, taskId, scope: "TASK" as const }
+      : { tenantId, projectId, scope: "PROJECT" as const };
+
+    const updated = await this.prisma.scheduleBaseline.findFirst({
+      where: { ...baseWhere, baselineKind: "UPDATED" },
+      orderBy: [{ baselineVersion: "desc" }, { baselineDate: "desc" }],
+    });
+    if (updated) return updated;
+
+    return this.prisma.scheduleBaseline.findFirst({
+      where: { ...baseWhere, baselineKind: "ORIGINAL" },
+      orderBy: [{ baselineVersion: "desc" }, { baselineDate: "desc" }],
+    });
   }
 
   private async computeExpectedProgressFromBaseline(
@@ -378,17 +540,99 @@ export class SchedulingService {
     taskId: string | undefined,
     fallbackStart: string,
     fallbackEnd: string,
+    asOf?: Date,
   ): Promise<number> {
-    const baseline = await this.prisma.scheduleBaseline.findFirst({
-      where: taskId
-        ? { tenantId, projectId, taskId, scope: "TASK" }
-        : { tenantId, projectId, scope: "PROJECT" },
-      orderBy: [{ baselineVersion: "desc" }, { baselineDate: "desc" }],
-    });
+    const baseline = await this.resolveActiveBaseline(tenantId, projectId, taskId);
 
     const start = baseline?.plannedStartDate.toISOString() ?? fallbackStart;
     const end = baseline?.plannedEndDate.toISOString() ?? fallbackEnd;
-    return this.calculateExpectedProgress(start, end);
+    return this.calculateExpectedProgress(start, end, asOf);
+  }
+
+  /**
+   * WBS-safe roll-up: weight leaf tasks only so parent summaries are not double-counted.
+   * Falls back to all tasks when there are no leaf rows (degenerate tree).
+   */
+  private async computeLeafWeightedMetricsForProject(
+    projectId: string,
+    tenantId: string,
+    asOf?: Date,
+  ): Promise<{ actual: number; expected: number; leafTaskCount: number }> {
+    const tasks = await this.prisma.task.findMany({
+      where: { tenantId, projectId },
+      include: { _count: { select: { children: true } } },
+    });
+    if (!tasks.length) {
+      return { actual: 0, expected: 0, leafTaskCount: 0 };
+    }
+
+    const leaves = tasks.filter((t) => t._count.children === 0);
+    const rollupTasks = leaves.length ? leaves : tasks;
+
+    let totalWeight = 0;
+    let actualW = 0;
+    let expectedW = 0;
+
+    for (const t of rollupTasks) {
+      const weight = Number(t.weight);
+      totalWeight += weight;
+      actualW += Number(t.progressPercent) * weight;
+      const expected = await this.computeExpectedProgressFromBaseline(
+        tenantId,
+        projectId,
+        t.id,
+        t.plannedStartDate.toISOString(),
+        t.plannedEndDate.toISOString(),
+        asOf,
+      );
+      expectedW += expected * weight;
+    }
+
+    const actual = totalWeight ? Number((actualW / totalWeight).toFixed(2)) : 0;
+    const expected = totalWeight ? Number((expectedW / totalWeight).toFixed(2)) : 0;
+    return { actual, expected, leafTaskCount: rollupTasks.length };
+  }
+
+  private async resolveProjectsForRollup(dto: ComputeScheduleRollupDto) {
+    const { tenantId, objectType, objectId } = dto;
+    switch (objectType) {
+      case "PROJECT": {
+        await this.ensureProject(objectId, tenantId);
+        return this.prisma.project.findMany({
+          where: { id: objectId, tenantId },
+          select: { id: true, plannedBudget: true },
+        });
+      }
+      case "PROGRAM": {
+        const program = await this.prisma.program.findFirst({ where: { id: objectId, tenantId } });
+        if (!program) throw new NotFoundException("Program not found.");
+        return this.prisma.project.findMany({
+          where: { tenantId, programId: objectId },
+          select: { id: true, plannedBudget: true },
+        });
+      }
+      case "PORTFOLIO": {
+        const portfolio = await this.prisma.portfolio.findFirst({ where: { id: objectId, tenantId } });
+        if (!portfolio) throw new NotFoundException("Portfolio not found.");
+        return this.prisma.project.findMany({
+          where: { tenantId, portfolioId: objectId },
+          select: { id: true, plannedBudget: true },
+        });
+      }
+      case "ENTERPRISE":
+        return this.prisma.project.findMany({
+          where: { tenantId },
+          select: { id: true, plannedBudget: true },
+        });
+      default:
+        throw new BadRequestException("Unsupported rollup object type.");
+    }
+  }
+
+  private varianceToScheduleRag(variance: number): "GREEN" | "AMBER" | "RED" {
+    if (variance >= -5) return "GREEN";
+    if (variance >= -10) return "AMBER";
+    return "RED";
   }
 
   private async recomputeExpectedProgressForScope(

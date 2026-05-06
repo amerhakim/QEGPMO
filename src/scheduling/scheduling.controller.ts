@@ -4,6 +4,7 @@ import { AuthGuard } from "../common/auth/auth.guard";
 import { RequestUser } from "../common/auth/request-user.interface";
 import { Permissions } from "../common/rbac/permissions.decorator";
 import { RbacGuard } from "../common/rbac/rbac.guard";
+import { ComputeScheduleRollupDto } from "./dto/compute-schedule-rollup.dto";
 import { CreateBaselineDto } from "./dto/create-baseline.dto";
 import { CreateDependencyDto } from "./dto/create-dependency.dto";
 import { CreateMilestoneDto } from "./dto/create-milestone.dto";
@@ -66,9 +67,16 @@ export class SchedulingController {
   calculateProjectProgress(
     @Param("projectId") projectId: string,
     @Query("tenantId") tenantId: string,
+    @Query("asOfDate") asOfDate: string | undefined,
     @Actor() actor: RequestUser,
   ) {
-    return this.schedulingService.calculateProjectProgress(projectId, tenantId, actor);
+    return this.schedulingService.calculateProjectProgress(projectId, tenantId, actor, asOfDate);
+  }
+
+  @Post("rollup/snapshot")
+  @Permissions("scheduling.rollup.compute")
+  computeRollupSnapshot(@Body() dto: ComputeScheduleRollupDto, @Actor() actor: RequestUser) {
+    return this.schedulingService.computeScheduleRollupSnapshot(dto, actor);
   }
 
   @Post("excel/import/preview")

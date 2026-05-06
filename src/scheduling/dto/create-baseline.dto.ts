@@ -1,4 +1,4 @@
-import { BaselineScope } from "@prisma/client";
+import { BaselineKind, BaselineScope } from "@prisma/client";
 import { Type } from "class-transformer";
 import { IsDateString, IsEnum, IsNumber, IsOptional, IsString, Min } from "class-validator";
 
@@ -15,6 +15,11 @@ export class CreateBaselineDto {
 
   @IsEnum(BaselineScope)
   scope!: BaselineScope;
+
+  /** Defaults: version 1 → ORIGINAL; later versions → UPDATED (MSP-style). */
+  @IsOptional()
+  @IsEnum(BaselineKind)
+  baselineKind?: BaselineKind;
 
   @Type(() => Number)
   @IsNumber()

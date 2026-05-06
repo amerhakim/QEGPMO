@@ -65,4 +65,28 @@ export class WorkflowHooksService {
       actor,
     );
   }
+
+  async startWeeklyStatusReportApproval(tenantId: string, weeklyStatusReportId: string, actor: RequestUser) {
+    return this.workflowService.startWorkflow(
+      {
+        tenantId,
+        workflowCode: "WEEKLY_STATUS_REPORT_APPROVAL",
+        entityType: "WEEKLY_STATUS_REPORT",
+        entityId: weeklyStatusReportId,
+      },
+      actor,
+    );
+  }
+
+  async startDetectedRiskSuggestionApproval(tenantId: string, suggestionId: string, actor: RequestUser) {
+    return this.workflowService.startWorkflow(
+      {
+        tenantId,
+        workflowCode: "DETECTED_RISK_SUGGESTION_APPROVAL",
+        entityType: "DETECTED_RISK_SUGGESTION",
+        entityId: suggestionId,
+      },
+      actor,
+    );
+  }
 }
